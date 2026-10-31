@@ -1,0 +1,20 @@
+[package]
+name = "louxna-bin"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "louxna"
+path = "src/main.rs"
+
+[features]
+default = ["jit"]
+jit = ["louxna/jit"]
+portable = ["louxna/portable"]
+
+[dependencies]
+louxna = { workspace = true }
+tokio = { workspace = true }
+mlua = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
