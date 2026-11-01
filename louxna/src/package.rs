@@ -15,7 +15,7 @@ pub const PKG_CONFIG_STEM: &str = "pkg.lx.toml";
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
 pub struct PkgConfig {
-    pub name: PkgName,
+    pub name: Box<PkgName>,
 }
 
 impl PkgConfig {
@@ -46,7 +46,7 @@ impl PkgConfig {
         Ok(())
     }
 
-    pub fn id(&self) -> PkgId {
+    pub fn id(&self) -> Box<PkgId> {
         PkgId::from_parts(PkgIdPartsRef::Minimal(self.name.as_ref()))
     }
 }

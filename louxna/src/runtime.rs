@@ -8,7 +8,7 @@ use tokio::fs;
 use crate::{
     Error,
     error::ErrorInner,
-    id::module::{ModId, ModIdPartsRef, ModPathRef},
+    id::module::{ModId, ModIdPartsRef, ModPath},
     module::Module,
     package::PkgConfig,
 };
@@ -37,7 +37,7 @@ impl Runtime {
         let main_data = fs::read(&main_path).await.map_err(|source| {
             ErrorInner::ReadLuaMod { path: main_path.clone(), source }
         })?;
-        let main_mod_path = ModPathRef::ROOT;
+        let main_mod_path = ModPath::ROOT;
         let main_id = ModId::from_parts(ModIdPartsRef::External {
             pkg_id: pkg_config.id().as_ref(),
             mod_path: main_mod_path,

@@ -1,160 +1,109 @@
-use std::{
-    borrow::Borrow,
-    ffi::{OsStr, OsString},
-    fmt,
-    str::FromStr,
-};
+use std::{borrow::Borrow, fmt, mem, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, error::ErrorInner, id::package::PkgIdRef};
+use crate::{Error, error::ErrorInner, id::package::PkgId};
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
-#[serde(try_from = "&str", into = "&str")]
-pub struct ModSegmentRef<'a> {
-    content: &'a str,
-}
-
-impl<'a> ModSegmentRef<'a> {
-    pub fn content(self) -> &'a str {
-        self.content
-    }
-
-    pub fn to_owned(self) -> ModSegment {
-        ModSegment { content: self.content.into() }
-    }
-}
-
-impl fmt::Display for ModSegmentRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
-    }
-}
-
-impl AsRef<str> for ModSegmentRef<'_> {
-    fn as_ref(&self) -> &str {
-        self.content()
-    }
-}
-
-impl Borrow<str> for ModSegmentRef<'_> {
-    fn borrow(&self) -> &str {
-        self.content()
-    }
-}
-
-impl PartialEq<str> for ModSegmentRef<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.content() == other
-    }
-}
-
-impl PartialEq<ModSegmentRef<'_>> for str {
-    fn eq(&self, other: &ModSegmentRef<'_>) -> bool {
-        self == other.content()
-    }
-}
-
-impl<'a> TryFrom<&'a str> for ModSegmentRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if !value.starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_')
-        {
-            Err(ErrorInner::InvalidModSegmentStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        }
-        if !value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
-            Err(ErrorInner::InvalidModSegmentStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        }
-        Ok(Self { content: value })
-    }
-}
-
-impl<'a> TryFrom<&'a OsStr> for ModSegmentRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        let Some(as_str) = value.to_str() else {
-            Err(ErrorInner::InvalidModSegmentOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        };
-        Self::try_from(as_str).map_err(|error| {
-            error.replacing(ErrorInner::InvalidModSegmentOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for ModSegmentRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for ModSegmentRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> From<ModSegmentRef<'a>> for &'a str {
-    fn from(value: ModSegmentRef<'a>) -> Self {
-        value.content()
-    }
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str", into = "String")]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct ModSegment {
-    content: Box<str>,
+    content: str,
 }
 
 impl ModSegment {
+    pub fn new(content: &str) -> Result<&Self, Error> {
+        if !content
+            .starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_')
+        {
+            Err(ErrorInner::InvalidModSegmentStr {
+                input: content.to_owned(),
+                path: Default::default(),
+            })?
+        }
+        if !content.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            Err(ErrorInner::InvalidModSegmentStr {
+                input: content.to_owned(),
+                path: Default::default(),
+            })?
+        }
+        unsafe { Ok(Self::new_unchecked(content)) }
+    }
+
+    pub fn new_boxed(content: Box<str>) -> Result<Box<Self>, Error> {
+        ModSegment::new(&content)?;
+        unsafe { Ok(Self::new_boxed_unchecked(content)) }
+    }
+
+    pub const unsafe fn new_unchecked(content: &str) -> &Self {
+        unsafe { mem::transmute(content) }
+    }
+
+    pub const unsafe fn new_boxed_unchecked(content: Box<str>) -> Box<Self> {
+        unsafe { mem::transmute(content) }
+    }
+
     pub fn content(&self) -> &str {
         &self.content
     }
+}
 
-    pub fn as_ref(&self) -> ModSegmentRef<'_> {
-        ModSegmentRef { content: self.content() }
+impl Clone for Box<ModSegment> {
+    fn clone(&self) -> Self {
+        Self::from(&**self)
     }
 }
 
-impl fmt::Display for ModSegment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
+impl From<&'_ ModSegment> for Box<ModSegment> {
+    fn from(value: &'_ ModSegment) -> Self {
+        unsafe {
+            ModSegment::new_boxed_unchecked(Box::<str>::from(value.content()))
+        }
     }
 }
 
-impl AsRef<Self> for ModSegment {
-    fn as_ref(&self) -> &Self {
-        self
+impl FromStr for Box<ModSegment> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ModSegment::new(s).map(Box::from)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'a ModSegment {
+    type Error = Error;
+
+    fn try_from(content: &'a str) -> Result<Self, Self::Error> {
+        ModSegment::new(content)
+    }
+}
+
+impl<'a> TryFrom<Box<str>> for Box<ModSegment> {
+    type Error = Error;
+
+    fn try_from(content: Box<str>) -> Result<Self, Self::Error> {
+        ModSegment::new_boxed(content)
+    }
+}
+
+impl<'a> TryFrom<String> for Box<ModSegment> {
+    type Error = Error;
+
+    fn try_from(content: String) -> Result<Self, Self::Error> {
+        Self::try_from(content.into_boxed_str())
+    }
+}
+
+impl ToOwned for ModSegment {
+    type Owned = Box<Self>;
+
+    fn to_owned(&self) -> Self::Owned {
+        Box::from(self)
+    }
+}
+
+impl Borrow<str> for ModSegment {
+    fn borrow(&self) -> &str {
+        self.content()
     }
 }
 
@@ -164,9 +113,9 @@ impl AsRef<str> for ModSegment {
     }
 }
 
-impl Borrow<str> for ModSegment {
-    fn borrow(&self) -> &str {
-        self.content()
+impl fmt::Display for ModSegment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.content())
     }
 }
 
@@ -182,237 +131,163 @@ impl PartialEq<ModSegment> for str {
     }
 }
 
-impl PartialEq<ModSegmentRef<'_>> for ModSegment {
-    fn eq(&self, other: &ModSegmentRef<'_>) -> bool {
-        self.as_ref() == *other
+impl Serialize for ModSegment {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.content())
     }
 }
 
-impl PartialEq<ModSegment> for ModSegmentRef<'_> {
-    fn eq(&self, other: &ModSegment) -> bool {
-        other.as_ref() == *self
+impl<'de> Deserialize<'de> for Box<ModSegment> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Box<ModSegment>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an alphanumeric identifier string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Box::try_from(v.to_owned()).map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_str(Visitor)
     }
 }
 
-impl<'a> TryFrom<&'a str> for ModSegment {
-    type Error = Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        ModSegmentRef::try_from(value).map(|r| r.to_owned())
-    }
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct ModPath {
+    content: str,
 }
 
-impl<'a> TryFrom<&'a OsStr> for ModSegment {
-    type Error = Error;
+impl ModPath {
+    pub const ROOT: &'static Self = unsafe { Self::new_unchecked("") };
 
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        ModSegmentRef::try_from(value).map(|r| r.to_owned())
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for ModSegment {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for ModSegment {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl From<ModSegment> for String {
-    fn from(value: ModSegment) -> Self {
-        value.content.into_string()
-    }
-}
-
-impl FromStr for ModSegment {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from(s)
-    }
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
-#[serde(try_from = "&str", into = "&str")]
-pub struct ModPathRef<'a> {
-    content: &'a str,
-}
-
-impl<'a> ModPathRef<'a> {
-    pub const ROOT: Self = Self { content: "" };
-
-    pub fn content(self) -> &'a str {
-        self.content
-    }
-
-    pub fn to_owned(self) -> ModPath {
-        ModPath { content: self.content.into() }
-    }
-
-    pub fn segments(
-        self,
-    ) -> impl Iterator<Item = ModSegmentRef<'a>> + Send + Sync {
-        self.content.split('.').map(|content| ModSegmentRef { content })
-    }
-}
-
-impl fmt::Display for ModPathRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
-    }
-}
-
-impl AsRef<str> for ModPathRef<'_> {
-    fn as_ref(&self) -> &str {
-        self.content()
-    }
-}
-
-impl Borrow<str> for ModPathRef<'_> {
-    fn borrow(&self) -> &str {
-        self.content()
-    }
-}
-
-impl PartialEq<str> for ModPathRef<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.content() == other
-    }
-}
-
-impl PartialEq<ModPathRef<'_>> for str {
-    fn eq(&self, other: &ModPathRef<'_>) -> bool {
-        self == other.content()
-    }
-}
-
-impl<'a> TryFrom<&'a str> for ModPathRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if value == &Self::ROOT {
+    pub fn new(content: &str) -> Result<&Self, Error> {
+        if content == Self::ROOT {
             return Ok(Self::ROOT);
         }
-        for segment in value.split(".") {
-            ModSegmentRef::try_from(segment).map_err(|error| {
+        for segment in content.split(".") {
+            ModSegment::new(segment).map_err(|error| {
                 error.replacing(ErrorInner::InvalidModPathStr {
-                    input: value.to_owned(),
+                    input: content.to_owned(),
                     path: Default::default(),
                 })
             })?;
         }
-        Ok(Self { content: value })
+        unsafe { Ok(Self::new_unchecked(content)) }
     }
-}
 
-impl<'a> TryFrom<&'a OsStr> for ModPathRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        let Some(as_str) = value.to_str() else {
-            Err(ErrorInner::InvalidModPathOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        };
-        Self::try_from(as_str).map_err(|error| {
-            error.replacing(ErrorInner::InvalidModPathOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })
+    pub fn new_boxed(content: Box<str>) -> Result<Box<Self>, Error> {
+        ModPath::new(&content)?;
+        unsafe { Ok(Self::new_boxed_unchecked(content)) }
     }
-}
 
-impl<'a> TryFrom<&'a OsString> for ModPathRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
+    pub const unsafe fn new_unchecked(content: &str) -> &Self {
+        unsafe { mem::transmute(content) }
     }
-}
 
-impl<'a> TryFrom<&'a String> for ModPathRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
+    pub const unsafe fn new_boxed_unchecked(content: Box<str>) -> Box<Self> {
+        unsafe { mem::transmute(content) }
     }
-}
 
-impl<'a> From<ModPathRef<'a>> for &'a str {
-    fn from(value: ModPathRef<'a>) -> Self {
-        value.content()
-    }
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str", into = "String")]
-pub struct ModPath {
-    content: Box<str>,
-}
-
-impl ModPath {
-    pub fn from_segments<'a>(
-        segments: impl IntoIterator<Item = ModSegmentRef<'a>>,
-    ) -> Self {
-        let mut iter = segments.into_iter();
+    pub fn from_parts(
+        parts: impl IntoIterator<Item = impl AsRef<ModSegment>>,
+    ) -> Box<Self> {
+        let mut iter = parts.into_iter();
         let mut content = String::new();
         if let Some(first) = iter.next() {
-            content.push_str(first.content());
+            content.push_str(first.as_ref().content());
             for segment in iter {
                 content.push('.');
-                content.push_str(segment.content());
+                content.push_str(segment.as_ref().content());
             }
         }
-        Self { content: content.into_boxed_str() }
+        unsafe { Self::new_boxed_unchecked(content.into_boxed_str()) }
+    }
+
+    pub fn parts<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = &'a ModSegment> + Send + Sync + 'a {
+        self.content()
+            .split('.')
+            .map(|segment| unsafe { ModSegment::new_unchecked(segment) })
     }
 
     pub fn content(&self) -> &str {
         &self.content
     }
+}
 
-    pub fn as_ref<'a>(&'a self) -> ModPathRef<'a> {
-        ModPathRef { content: self.content() }
-    }
-
-    pub fn segments<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = ModSegmentRef<'a>> + Send + Sync + 'a {
-        self.as_ref().segments()
+impl Clone for Box<ModPath> {
+    fn clone(&self) -> Self {
+        Self::from(&**self)
     }
 }
 
-impl fmt::Display for ModPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
+impl From<&'_ ModPath> for Box<ModPath> {
+    fn from(value: &'_ ModPath) -> Self {
+        unsafe {
+            ModPath::new_boxed_unchecked(Box::<str>::from(value.content()))
+        }
     }
 }
 
-impl AsRef<Self> for ModPath {
-    fn as_ref(&self) -> &Self {
-        self
+impl FromStr for Box<ModPath> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ModPath::new(s).map(Box::from)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'a ModPath {
+    type Error = Error;
+
+    fn try_from(content: &'a str) -> Result<Self, Self::Error> {
+        ModPath::new(content)
+    }
+}
+
+impl<'a> TryFrom<Box<str>> for Box<ModPath> {
+    type Error = Error;
+
+    fn try_from(content: Box<str>) -> Result<Self, Self::Error> {
+        ModPath::new_boxed(content)
+    }
+}
+
+impl<'a> TryFrom<String> for Box<ModPath> {
+    type Error = Error;
+
+    fn try_from(content: String) -> Result<Self, Self::Error> {
+        Self::try_from(content.into_boxed_str())
+    }
+}
+
+impl ToOwned for ModPath {
+    type Owned = Box<Self>;
+
+    fn to_owned(&self) -> Self::Owned {
+        Box::from(self)
+    }
+}
+
+impl Borrow<str> for ModPath {
+    fn borrow(&self) -> &str {
+        self.content()
     }
 }
 
@@ -422,9 +297,9 @@ impl AsRef<str> for ModPath {
     }
 }
 
-impl Borrow<str> for ModPath {
-    fn borrow(&self) -> &str {
-        self.content()
+impl fmt::Display for ModPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.content())
     }
 }
 
@@ -440,79 +315,58 @@ impl PartialEq<ModPath> for str {
     }
 }
 
-impl PartialEq<ModPathRef<'_>> for ModPath {
-    fn eq(&self, other: &ModPathRef<'_>) -> bool {
-        self.as_ref() == *other
+impl Serialize for ModPath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.content())
     }
 }
 
-impl PartialEq<ModPath> for ModPathRef<'_> {
-    fn eq(&self, other: &ModPath) -> bool {
-        other.as_ref() == *self
-    }
-}
+impl<'de> Deserialize<'de> for Box<ModPath> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
 
-impl<'a> TryFrom<&'a str> for ModPath {
-    type Error = Error;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Box<ModPath>;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        ModPathRef::try_from(value).map(|r| r.to_owned())
-    }
-}
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "a text of dot-separated sequence of module segments",
+                )
+            }
 
-impl<'a> TryFrom<&'a OsStr> for ModPath {
-    type Error = Error;
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Box::try_from(v.to_owned()).map_err(E::custom)
+            }
+        }
 
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        ModPathRef::try_from(value).map(|r| r.to_owned())
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for ModPath {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for ModPath {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl From<ModPath> for String {
-    fn from(value: ModPath) -> Self {
-        value.content.into_string()
-    }
-}
-
-impl FromStr for ModPath {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from(s)
+        deserializer.deserialize_str(Visitor)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModIdPartsRef<'a> {
-    External { pkg_id: PkgIdRef<'a>, mod_path: ModPathRef<'a> },
-    Internal { mod_path: ModPathRef<'a> },
+    External { pkg_id: &'a PkgId, mod_path: &'a ModPath },
+    Internal { mod_path: &'a ModPath },
 }
 
 impl<'a> ModIdPartsRef<'a> {
-    pub fn pkg_id(self) -> Option<PkgIdRef<'a>> {
+    pub fn pkg_id(self) -> Option<&'a PkgId> {
         match self {
             Self::External { pkg_id, .. } => Some(pkg_id),
             Self::Internal { .. } => None,
         }
     }
 
-    pub fn mod_path(self) -> ModPathRef<'a> {
+    pub fn mod_path(self) -> &'a ModPath {
         match self {
             Self::External { mod_path, .. } => mod_path,
             Self::Internal { mod_path } => mod_path,
@@ -520,154 +374,69 @@ impl<'a> ModIdPartsRef<'a> {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
-#[serde(try_from = "&str", into = "&str")]
-pub struct ModIdRef<'a> {
-    content: &'a str,
-}
-
-impl<'a> ModIdRef<'a> {
-    pub fn content(self) -> &'a str {
-        self.content
-    }
-
-    pub fn parts(self) -> ModIdPartsRef<'a> {
-        match self.content().split_once('/') {
-            Some((pkg_id, mod_path)) => ModIdPartsRef::External {
-                pkg_id: PkgIdRef::from_raw(pkg_id),
-                mod_path: ModPathRef { content: mod_path },
-            },
-            None => ModIdPartsRef::Internal {
-                mod_path: ModPathRef { content: self.content() },
-            },
-        }
-    }
-
-    pub fn to_owned(self) -> ModId {
-        ModId { content: self.content.into() }
-    }
-}
-
-impl fmt::Display for ModIdRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
-    }
-}
-
-impl AsRef<str> for ModIdRef<'_> {
-    fn as_ref(&self) -> &str {
-        self.content()
-    }
-}
-
-impl Borrow<str> for ModIdRef<'_> {
-    fn borrow(&self) -> &str {
-        self.content()
-    }
-}
-
-impl PartialEq<str> for ModIdRef<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.content() == other
-    }
-}
-
-impl PartialEq<ModIdRef<'_>> for str {
-    fn eq(&self, other: &ModIdRef<'_>) -> bool {
-        self == other.content()
-    }
-}
-
-impl<'a> TryFrom<&'a str> for ModIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        let result = match value.split_once('/') {
-            Some((pkg_id, mod_path)) => PkgIdRef::try_from(pkg_id)
-                .and_then(|_| ModPathRef::try_from(mod_path))
-                .map(|_| ()),
-            None => ModPathRef::try_from(value).map(|_| ()),
-        };
-        result.map_err(|error| {
-            error.replacing(ErrorInner::InvalidModIdStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })?;
-        Ok(Self { content: value })
-    }
-}
-
-impl<'a> TryFrom<&'a OsStr> for ModIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        let Some(as_str) = value.to_str() else {
-            Err(ErrorInner::InvalidModIdOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        };
-        Self::try_from(as_str).map_err(|error| {
-            error.replacing(ErrorInner::InvalidModIdOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for ModIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for ModIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> From<ModIdRef<'a>> for &'a str {
-    fn from(value: ModIdRef<'a>) -> Self {
-        value.content()
-    }
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str", into = "String")]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct ModId {
-    content: Box<str>,
+    content: str,
 }
 
 impl ModId {
-    pub fn from_parts(parts: ModIdPartsRef<'_>) -> Self {
+    pub const INTERNAL_ROOT: &'static Self = unsafe { Self::new_unchecked("") };
+
+    pub fn new(content: &str) -> Result<&Self, Error> {
+        let result = match content.split_once('/') {
+            Some((pkg_id, mod_path)) => PkgId::new(pkg_id)
+                .and_then(|_| ModPath::new(mod_path))
+                .map(|_| ()),
+            None => ModPath::new(content).map(|_| ()),
+        };
+        result.map_err(|error| {
+            error.replacing(ErrorInner::InvalidModIdStr {
+                input: content.to_owned(),
+                path: Default::default(),
+            })
+        })?;
+        unsafe { Ok(Self::new_unchecked(content)) }
+    }
+
+    pub fn new_boxed(content: Box<str>) -> Result<Box<Self>, Error> {
+        ModId::new(&content)?;
+        unsafe { Ok(Self::new_boxed_unchecked(content)) }
+    }
+
+    pub const unsafe fn new_unchecked(content: &str) -> &Self {
+        unsafe { mem::transmute(content) }
+    }
+
+    pub const unsafe fn new_boxed_unchecked(content: Box<str>) -> Box<Self> {
+        unsafe { mem::transmute(content) }
+    }
+
+    pub fn from_parts(parts: ModIdPartsRef<'_>) -> Box<Self> {
         match parts {
             ModIdPartsRef::External { pkg_id, mod_path } => {
                 let content =
                     format!("{}/{}", pkg_id.content(), mod_path.content());
-                Self { content: content.into_boxed_str() }
+                unsafe { Self::new_boxed_unchecked(content.into_boxed_str()) }
             },
-            ModIdPartsRef::Internal { mod_path } => {
-                Self { content: mod_path.content().into() }
+            ModIdPartsRef::Internal { mod_path } => unsafe {
+                Self::new_boxed_unchecked(mod_path.content().into())
+            },
+        }
+    }
+
+    pub fn parts<'a>(&'a self) -> ModIdPartsRef<'a> {
+        match self.content().split_once('/') {
+            Some((pkg_id, mod_path)) => unsafe {
+                ModIdPartsRef::External {
+                    pkg_id: PkgId::new_unchecked(pkg_id),
+                    mod_path: ModPath::new_unchecked(mod_path),
+                }
+            },
+            None => unsafe {
+                ModIdPartsRef::Internal {
+                    mod_path: ModPath::new_unchecked(self.content()),
+                }
             },
         }
     }
@@ -675,25 +444,63 @@ impl ModId {
     pub fn content(&self) -> &str {
         &self.content
     }
+}
 
-    pub fn as_ref<'a>(&'a self) -> ModIdRef<'a> {
-        ModIdRef { content: self.content() }
-    }
-
-    pub fn parts<'a>(&'a self) -> ModIdPartsRef<'a> {
-        self.as_ref().parts()
+impl Clone for Box<ModId> {
+    fn clone(&self) -> Self {
+        Self::from(&**self)
     }
 }
 
-impl fmt::Display for ModId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
+impl From<&'_ ModId> for Box<ModId> {
+    fn from(value: &'_ ModId) -> Self {
+        unsafe { ModId::new_boxed_unchecked(Box::<str>::from(value.content())) }
     }
 }
 
-impl AsRef<Self> for ModId {
-    fn as_ref(&self) -> &Self {
-        self
+impl FromStr for Box<ModId> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ModId::new(s).map(Box::from)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'a ModId {
+    type Error = Error;
+
+    fn try_from(content: &'a str) -> Result<Self, Self::Error> {
+        ModId::new(content)
+    }
+}
+
+impl<'a> TryFrom<Box<str>> for Box<ModId> {
+    type Error = Error;
+
+    fn try_from(content: Box<str>) -> Result<Self, Self::Error> {
+        ModId::new_boxed(content)
+    }
+}
+
+impl<'a> TryFrom<String> for Box<ModId> {
+    type Error = Error;
+
+    fn try_from(content: String) -> Result<Self, Self::Error> {
+        Self::try_from(content.into_boxed_str())
+    }
+}
+
+impl ToOwned for ModId {
+    type Owned = Box<Self>;
+
+    fn to_owned(&self) -> Self::Owned {
+        Box::from(self)
+    }
+}
+
+impl Borrow<str> for ModId {
+    fn borrow(&self) -> &str {
+        self.content()
     }
 }
 
@@ -703,9 +510,9 @@ impl AsRef<str> for ModId {
     }
 }
 
-impl Borrow<str> for ModId {
-    fn borrow(&self) -> &str {
-        self.content()
+impl fmt::Display for ModId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.content())
     }
 }
 
@@ -721,61 +528,41 @@ impl PartialEq<ModId> for str {
     }
 }
 
-impl PartialEq<ModIdRef<'_>> for ModId {
-    fn eq(&self, other: &ModIdRef<'_>) -> bool {
-        self.as_ref() == *other
+impl Serialize for ModId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.content())
     }
 }
 
-impl PartialEq<ModId> for ModIdRef<'_> {
-    fn eq(&self, other: &ModId) -> bool {
-        other.as_ref() == *self
-    }
-}
+impl<'de> Deserialize<'de> for Box<ModId> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
 
-impl<'a> TryFrom<&'a str> for ModId {
-    type Error = Error;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Box<ModId>;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        ModIdRef::try_from(value).map(|r| r.to_owned())
-    }
-}
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str(
+                    "a text of package id, '/', and dot-separated sequence of \
+                     module segments",
+                )
+            }
 
-impl<'a> TryFrom<&'a OsStr> for ModId {
-    type Error = Error;
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Box::try_from(v.to_owned()).map_err(E::custom)
+            }
+        }
 
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        ModIdRef::try_from(value).map(|r| r.to_owned())
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for ModId {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for ModId {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl From<ModId> for String {
-    fn from(value: ModId) -> Self {
-        value.content.into_string()
-    }
-}
-
-impl FromStr for ModId {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from(s)
+        deserializer.deserialize_str(Visitor)
     }
 }
 
@@ -784,107 +571,107 @@ mod test {
     use anyhow::Result;
 
     use crate::id::{
-        module::{ModId, ModIdPartsRef, ModPath, ModPathRef, ModSegment},
-        package::{PkgId, PkgIdRef},
+        module::{ModId, ModIdPartsRef, ModPath, ModSegment},
+        package::PkgId,
     };
 
     #[test]
     fn mod_segment_should_accept_alphabetic() -> Result<()> {
-        ModSegment::try_from("foobar")?;
+        ModSegment::new("foobar")?;
         Ok(())
     }
 
     #[test]
     fn mod_segment_should_accept_numeric_not_at_start() -> Result<()> {
-        ModSegment::try_from("foobar123")?;
+        ModSegment::new("foobar123")?;
         Ok(())
     }
 
     #[test]
     fn mod_segment_should_accept_underscore() -> Result<()> {
-        ModSegment::try_from("_abc")?;
+        ModSegment::new("_abc")?;
         Ok(())
     }
 
     #[test]
     fn mod_segment_should_not_accept_numeric_at_start() -> Result<()> {
-        let result = ModSegment::try_from("0abc");
+        let result = ModSegment::new("0abc");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn mod_segment_should_not_accept_special() -> Result<()> {
-        let result = ModSegment::try_from("~abc");
+        let result = ModSegment::new("~abc");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn mod_segment_should_not_accept_unicode() -> Result<()> {
-        let result = ModSegment::try_from("abç");
+        let result = ModSegment::new("abç");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn mod_segment_should_not_empty() -> Result<()> {
-        let result = ModSegment::try_from("");
+        let result = ModSegment::new("");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn mod_path_should_accept_empty_as_root() -> Result<()> {
-        let segment = ModPath::try_from("")?;
-        assert_eq!(segment, ModPathRef::ROOT);
+        let segment = ModPath::new("")?;
+        assert_eq!(segment, ModPath::ROOT);
         Ok(())
     }
 
     #[test]
     fn mod_path_should_accept_single_segment() -> Result<()> {
-        let segment = ModPath::try_from("music")?;
-        assert_eq!(&segment, "music");
+        let segment = ModPath::new("music")?;
+        assert_eq!(segment, "music");
         Ok(())
     }
 
     #[test]
     fn mod_path_should_accept_two_segments() -> Result<()> {
-        let segment = ModPath::try_from("music.tempo")?;
-        assert_eq!(&segment, "music.tempo");
+        let segment = ModPath::new("music.tempo")?;
+        assert_eq!(segment, "music.tempo");
         Ok(())
     }
 
     #[test]
     fn mod_path_should_accept_three_segments() -> Result<()> {
-        let segment = ModPath::try_from("music.tempo.signature")?;
-        assert_eq!(&segment, "music.tempo.signature");
+        let segment = ModPath::new("music.tempo.signature")?;
+        assert_eq!(segment, "music.tempo.signature");
         Ok(())
     }
 
     #[test]
     fn mod_path_should_not_accept_empty_segmeents() -> Result<()> {
-        let result = ModPath::try_from("music..signature");
+        let result = ModPath::new("music..signature");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn mod_path_should_not_accept_invalid_segments() -> Result<()> {
-        let result = ModPath::try_from("music.abç.signature");
+        let result = ModPath::new("music.abç.signature");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn mod_id_should_accept_external_root() -> Result<()> {
-        let id = ModId::try_from("foobar/")?;
+        let id = ModId::new("foobar/")?;
         let parts = id.parts();
         assert_eq!(
             parts,
             ModIdPartsRef::External {
-                pkg_id: PkgIdRef::try_from("foobar")?,
-                mod_path: ModPathRef::ROOT,
+                pkg_id: PkgId::new("foobar")?,
+                mod_path: ModPath::ROOT,
             }
         );
         Ok(())
@@ -892,13 +679,13 @@ mod test {
 
     #[test]
     fn mod_id_should_accept_external_non_root_path() -> Result<()> {
-        let id = ModId::try_from("foobar/music.tuning")?;
+        let id = ModId::new("foobar/music.tuning")?;
         let parts = id.parts();
         assert_eq!(
             parts,
             ModIdPartsRef::External {
-                pkg_id: PkgIdRef::try_from("foobar")?,
-                mod_path: ModPathRef::try_from("music.tuning")?,
+                pkg_id: PkgId::new("foobar")?,
+                mod_path: ModPath::new("music.tuning")?,
             },
         );
         Ok(())
@@ -906,25 +693,20 @@ mod test {
 
     #[test]
     fn mod_id_should_accept_internal_path() -> Result<()> {
-        let id = ModId::try_from("music.tuning")?;
+        let id = ModId::new("music.tuning")?;
         let parts = id.parts();
         assert_eq!(
             parts,
-            ModIdPartsRef::Internal {
-                mod_path: ModPathRef::try_from("music.tuning")?,
-            },
+            ModIdPartsRef::Internal { mod_path: ModPath::new("music.tuning")? },
         );
         Ok(())
     }
 
     #[test]
     fn mod_id_should_accept_internal_root() -> Result<()> {
-        let id = ModId::try_from("")?;
+        let id = ModId::new("")?;
         let parts = id.parts();
-        assert_eq!(
-            parts,
-            ModIdPartsRef::Internal { mod_path: ModPathRef::ROOT },
-        );
+        assert_eq!(parts, ModIdPartsRef::Internal { mod_path: ModPath::ROOT },);
         Ok(())
     }
 }

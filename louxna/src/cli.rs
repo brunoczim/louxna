@@ -47,7 +47,7 @@ impl RunCommand {
 #[derive(Debug, Clone, Args)]
 pub struct InitCommand {
     #[clap(short = 'n', long = "name")]
-    pub name: PkgName,
+    pub name: Box<PkgName>,
 }
 
 impl InitCommand {

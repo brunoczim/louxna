@@ -8,7 +8,7 @@ use crate::id::module::ModId;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Module {
     pub path: PathBuf,
-    pub id: ModId,
+    pub id: Box<ModId>,
     pub content: Vec<u8>,
 }
 

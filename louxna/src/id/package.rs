@@ -1,160 +1,109 @@
-use std::{
-    borrow::Borrow,
-    ffi::{OsStr, OsString},
-    fmt,
-    str::FromStr,
-};
+use std::{borrow::Borrow, fmt, mem, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, error::ErrorInner};
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
-#[serde(try_from = "&str", into = "&str")]
-pub struct PkgNameRef<'a> {
-    content: &'a str,
-}
-
-impl<'a> PkgNameRef<'a> {
-    pub fn content(self) -> &'a str {
-        self.content
-    }
-
-    pub fn to_owned(self) -> PkgName {
-        PkgName { content: self.content.into() }
-    }
-}
-
-impl fmt::Display for PkgNameRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
-    }
-}
-
-impl AsRef<str> for PkgNameRef<'_> {
-    fn as_ref(&self) -> &str {
-        self.content()
-    }
-}
-
-impl Borrow<str> for PkgNameRef<'_> {
-    fn borrow(&self) -> &str {
-        self.content()
-    }
-}
-
-impl PartialEq<str> for PkgNameRef<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.content() == other
-    }
-}
-
-impl PartialEq<PkgNameRef<'_>> for str {
-    fn eq(&self, other: &PkgNameRef<'_>) -> bool {
-        self == other.content()
-    }
-}
-
-impl<'a> TryFrom<&'a str> for PkgNameRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        if !value.starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_')
-        {
-            Err(ErrorInner::InvalidPkgNameStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        }
-        if !value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
-            Err(ErrorInner::InvalidPkgNameStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        }
-        Ok(Self { content: value })
-    }
-}
-
-impl<'a> TryFrom<&'a OsStr> for PkgNameRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        let Some(as_str) = value.to_str() else {
-            Err(ErrorInner::InvalidPkgNameOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        };
-        Self::try_from(as_str).map_err(|error| {
-            error.replacing(ErrorInner::InvalidPkgNameOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for PkgNameRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for PkgNameRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> From<PkgNameRef<'a>> for &'a str {
-    fn from(value: PkgNameRef<'a>) -> Self {
-        value.content()
-    }
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str", into = "String")]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct PkgName {
-    content: Box<str>,
+    content: str,
 }
 
 impl PkgName {
+    pub fn new(content: &str) -> Result<&Self, Error> {
+        if !content
+            .starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_')
+        {
+            Err(ErrorInner::InvalidPkgNameStr {
+                input: content.to_owned(),
+                path: Default::default(),
+            })?
+        }
+        if !content.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            Err(ErrorInner::InvalidPkgNameStr {
+                input: content.to_owned(),
+                path: Default::default(),
+            })?
+        }
+        unsafe { Ok(Self::new_unchecked(content)) }
+    }
+
+    pub fn new_boxed(content: Box<str>) -> Result<Box<Self>, Error> {
+        PkgName::new(&content)?;
+        unsafe { Ok(Self::new_boxed_unchecked(content)) }
+    }
+
+    pub const unsafe fn new_unchecked(content: &str) -> &Self {
+        unsafe { mem::transmute(content) }
+    }
+
+    pub const unsafe fn new_boxed_unchecked(content: Box<str>) -> Box<Self> {
+        unsafe { mem::transmute(content) }
+    }
+
     pub fn content(&self) -> &str {
         &self.content
     }
+}
 
-    pub fn as_ref(&self) -> PkgNameRef<'_> {
-        PkgNameRef { content: self.content() }
+impl Clone for Box<PkgName> {
+    fn clone(&self) -> Self {
+        Self::from(&**self)
     }
 }
 
-impl fmt::Display for PkgName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
+impl From<&'_ PkgName> for Box<PkgName> {
+    fn from(value: &'_ PkgName) -> Self {
+        unsafe {
+            PkgName::new_boxed_unchecked(Box::<str>::from(value.content()))
+        }
     }
 }
 
-impl AsRef<Self> for PkgName {
-    fn as_ref(&self) -> &Self {
-        self
+impl FromStr for Box<PkgName> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PkgName::new(s).map(Box::from)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'a PkgName {
+    type Error = Error;
+
+    fn try_from(content: &'a str) -> Result<Self, Self::Error> {
+        PkgName::new(content)
+    }
+}
+
+impl<'a> TryFrom<Box<str>> for Box<PkgName> {
+    type Error = Error;
+
+    fn try_from(content: Box<str>) -> Result<Self, Self::Error> {
+        PkgName::new_boxed(content)
+    }
+}
+
+impl<'a> TryFrom<String> for Box<PkgName> {
+    type Error = Error;
+
+    fn try_from(content: String) -> Result<Self, Self::Error> {
+        Self::try_from(content.into_boxed_str())
+    }
+}
+
+impl ToOwned for PkgName {
+    type Owned = Box<Self>;
+
+    fn to_owned(&self) -> Self::Owned {
+        Box::from(self)
+    }
+}
+
+impl Borrow<str> for PkgName {
+    fn borrow(&self) -> &str {
+        self.content()
     }
 }
 
@@ -164,9 +113,9 @@ impl AsRef<str> for PkgName {
     }
 }
 
-impl Borrow<str> for PkgName {
-    fn borrow(&self) -> &str {
-        self.content()
+impl fmt::Display for PkgName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.content())
     }
 }
 
@@ -182,228 +131,151 @@ impl PartialEq<PkgName> for str {
     }
 }
 
-impl PartialEq<PkgNameRef<'_>> for PkgName {
-    fn eq(&self, other: &PkgNameRef<'_>) -> bool {
-        self.as_ref() == *other
+impl Serialize for PkgName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.content())
     }
 }
 
-impl PartialEq<PkgName> for PkgNameRef<'_> {
-    fn eq(&self, other: &PkgName) -> bool {
-        other.as_ref() == *self
-    }
-}
+impl<'de> Deserialize<'de> for Box<PkgName> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
 
-impl<'a> TryFrom<&'a str> for PkgName {
-    type Error = Error;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Box<PkgName>;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        PkgNameRef::try_from(value).map(|r| r.to_owned())
-    }
-}
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an alphanumeric identifier string")
+            }
 
-impl<'a> TryFrom<&'a OsStr> for PkgName {
-    type Error = Error;
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Box::try_from(v.to_owned()).map_err(E::custom)
+            }
+        }
 
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        PkgNameRef::try_from(value).map(|r| r.to_owned())
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for PkgName {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for PkgName {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl From<PkgName> for String {
-    fn from(value: PkgName) -> Self {
-        value.content.into_string()
-    }
-}
-
-impl FromStr for PkgName {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from(s)
+        deserializer.deserialize_str(Visitor)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PkgIdPartsRef<'a> {
-    Minimal(PkgNameRef<'a>),
+    Minimal(&'a PkgName),
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
-#[serde(try_from = "&str", into = "&str")]
-pub struct PkgIdRef<'a> {
-    content: &'a str,
-}
-
-impl<'a> PkgIdRef<'a> {
-    pub(super) fn from_raw(raw: &'a str) -> Self {
-        Self { content: raw }
-    }
-
-    pub fn content(self) -> &'a str {
-        self.content
-    }
-
-    pub fn to_owned(self) -> PkgId {
-        PkgId { content: self.content.into() }
-    }
-
-    pub fn parts(self) -> PkgIdPartsRef<'a> {
-        PkgIdPartsRef::Minimal(PkgNameRef { content: self.content() })
-    }
-}
-
-impl fmt::Display for PkgIdRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
-    }
-}
-
-impl AsRef<str> for PkgIdRef<'_> {
-    fn as_ref(&self) -> &str {
-        self.content()
-    }
-}
-
-impl Borrow<str> for PkgIdRef<'_> {
-    fn borrow(&self) -> &str {
-        self.content()
-    }
-}
-
-impl PartialEq<str> for PkgIdRef<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.content() == other
-    }
-}
-
-impl PartialEq<PkgIdRef<'_>> for str {
-    fn eq(&self, other: &PkgIdRef<'_>) -> bool {
-        self == other.content()
-    }
-}
-
-impl<'a> TryFrom<&'a str> for PkgIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        PkgName::try_from(value).map_err(|error| {
-            error.replacing(ErrorInner::InvalidPkgIdStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })?;
-        Ok(Self { content: value })
-    }
-}
-
-impl<'a> TryFrom<&'a OsStr> for PkgIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        let Some(as_str) = value.to_str() else {
-            Err(ErrorInner::InvalidPkgIdOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })?
-        };
-        Self::try_from(as_str).map_err(|error| {
-            error.replacing(ErrorInner::InvalidPkgIdOsStr {
-                input: value.to_owned(),
-                path: Default::default(),
-            })
-        })
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for PkgIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for PkgIdRef<'a> {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> From<PkgIdRef<'a>> for &'a str {
-    fn from(value: PkgIdRef<'a>) -> Self {
-        value.content()
-    }
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str", into = "String")]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct PkgId {
-    content: Box<str>,
+    content: str,
 }
 
 impl PkgId {
-    pub fn from_parts(parts: PkgIdPartsRef<'_>) -> Self {
-        match parts {
-            PkgIdPartsRef::Minimal(name) => {
-                Self { content: name.content().into() }
-            },
-        }
+    pub fn new(content: &str) -> Result<&Self, Error> {
+        PkgName::new(content).map_err(|error| {
+            error.replacing(ErrorInner::InvalidPkgIdStr {
+                input: content.to_owned(),
+                path: Default::default(),
+            })
+        })?;
+        unsafe { Ok(Self::new_unchecked(content)) }
+    }
+
+    pub fn new_boxed(content: Box<str>) -> Result<Box<Self>, Error> {
+        PkgName::new(&content)?;
+        unsafe { Ok(Self::new_boxed_unchecked(content)) }
+    }
+
+    pub const unsafe fn new_unchecked(content: &str) -> &Self {
+        unsafe { mem::transmute(content) }
+    }
+
+    pub const unsafe fn new_boxed_unchecked(content: Box<str>) -> Box<Self> {
+        unsafe { mem::transmute(content) }
     }
 
     pub fn content(&self) -> &str {
         &self.content
     }
 
-    pub fn as_ref(&self) -> PkgIdRef<'_> {
-        PkgIdRef { content: self.content() }
+    pub fn from_parts(parts: PkgIdPartsRef<'_>) -> Box<Self> {
+        match parts {
+            PkgIdPartsRef::Minimal(parts) => {
+                let buf = format!("{}", parts);
+                unsafe { Self::new_boxed_unchecked(buf.into_boxed_str()) }
+            },
+        }
     }
 
     pub fn parts<'a>(&'a self) -> PkgIdPartsRef<'a> {
-        self.as_ref().parts()
+        PkgIdPartsRef::Minimal(unsafe {
+            PkgName::new_unchecked(self.content())
+        })
     }
 }
 
-impl fmt::Display for PkgId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content())
+impl Clone for Box<PkgId> {
+    fn clone(&self) -> Self {
+        Self::from(&**self)
     }
 }
 
-impl AsRef<Self> for PkgId {
-    fn as_ref(&self) -> &Self {
-        self
+impl From<&'_ PkgId> for Box<PkgId> {
+    fn from(value: &'_ PkgId) -> Self {
+        unsafe { PkgId::new_boxed_unchecked(Box::<str>::from(value.content())) }
+    }
+}
+
+impl FromStr for Box<PkgId> {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PkgId::new(s).map(Box::from)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'a PkgId {
+    type Error = Error;
+
+    fn try_from(content: &'a str) -> Result<Self, Self::Error> {
+        PkgId::new(content)
+    }
+}
+
+impl<'a> TryFrom<Box<str>> for Box<PkgId> {
+    type Error = Error;
+
+    fn try_from(content: Box<str>) -> Result<Self, Self::Error> {
+        PkgId::new_boxed(content)
+    }
+}
+
+impl<'a> TryFrom<String> for Box<PkgId> {
+    type Error = Error;
+
+    fn try_from(content: String) -> Result<Self, Self::Error> {
+        Self::try_from(content.into_boxed_str())
+    }
+}
+
+impl ToOwned for PkgId {
+    type Owned = Box<Self>;
+
+    fn to_owned(&self) -> Self::Owned {
+        Box::from(self)
+    }
+}
+
+impl Borrow<str> for PkgId {
+    fn borrow(&self) -> &str {
+        self.content()
     }
 }
 
@@ -413,9 +285,9 @@ impl AsRef<str> for PkgId {
     }
 }
 
-impl Borrow<str> for PkgId {
-    fn borrow(&self) -> &str {
-        self.content()
+impl fmt::Display for PkgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.content())
     }
 }
 
@@ -431,61 +303,38 @@ impl PartialEq<PkgId> for str {
     }
 }
 
-impl PartialEq<PkgIdRef<'_>> for PkgId {
-    fn eq(&self, other: &PkgIdRef<'_>) -> bool {
-        self.as_ref() == *other
+impl Serialize for PkgId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.content())
     }
 }
 
-impl PartialEq<PkgId> for PkgIdRef<'_> {
-    fn eq(&self, other: &PkgId) -> bool {
-        other.as_ref() == *self
-    }
-}
+impl<'de> Deserialize<'de> for Box<PkgId> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
 
-impl<'a> TryFrom<&'a str> for PkgId {
-    type Error = Error;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Box<PkgId>;
 
-    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        PkgIdRef::try_from(value).map(|r| r.to_owned())
-    }
-}
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an alphanumeric identifier string")
+            }
 
-impl<'a> TryFrom<&'a OsStr> for PkgId {
-    type Error = Error;
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Box::try_from(v.to_owned()).map_err(E::custom)
+            }
+        }
 
-    fn try_from(value: &'a OsStr) -> Result<Self, Self::Error> {
-        PkgIdRef::try_from(value).map(|r| r.to_owned())
-    }
-}
-
-impl<'a> TryFrom<&'a OsString> for PkgId {
-    type Error = Error;
-
-    fn try_from(value: &'a OsString) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl<'a> TryFrom<&'a String> for PkgId {
-    type Error = Error;
-
-    fn try_from(value: &'a String) -> Result<Self, Self::Error> {
-        Self::try_from(&**value)
-    }
-}
-
-impl From<PkgId> for String {
-    fn from(value: PkgId) -> Self {
-        value.content.into_string()
-    }
-}
-
-impl FromStr for PkgId {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from(s)
+        deserializer.deserialize_str(Visitor)
     }
 }
 
@@ -497,100 +346,100 @@ mod test {
 
     #[test]
     fn pkg_name_should_accept_alphabetic() -> Result<()> {
-        PkgName::try_from("foobar")?;
+        PkgName::new("foobar")?;
         Ok(())
     }
 
     #[test]
     fn pkg_name_should_accept_numeric_not_at_start() -> Result<()> {
-        PkgName::try_from("foobar123")?;
+        PkgName::new("foobar123")?;
         Ok(())
     }
 
     #[test]
     fn pkg_name_should_accept_underscore() -> Result<()> {
-        PkgName::try_from("_abc")?;
+        PkgName::new("_abc")?;
         Ok(())
     }
 
     #[test]
     fn pkg_name_should_not_accept_numeric_at_start() -> Result<()> {
-        let result = PkgName::try_from("0abc");
+        let result = PkgName::new("0abc");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_name_should_not_accept_special() -> Result<()> {
-        let result = PkgName::try_from("~abc");
+        let result = PkgName::new("~abc");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_name_should_not_accept_unicode() -> Result<()> {
-        let result = PkgName::try_from("abç");
+        let result = PkgName::new("abç");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_name_should_not_empty() -> Result<()> {
-        let result = PkgName::try_from("");
+        let result = PkgName::new("");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_accept_alphabetic() -> Result<()> {
-        PkgId::try_from("foobar")?;
+        PkgId::new("foobar")?;
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_accept_numeric_not_at_start() -> Result<()> {
-        PkgId::try_from("foobar123")?;
+        PkgId::new("foobar123")?;
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_accept_underscore() -> Result<()> {
-        PkgId::try_from("_abc")?;
+        PkgId::new("_abc")?;
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_not_accept_numeric_at_start() -> Result<()> {
-        let result = PkgId::try_from("0abc");
+        let result = PkgId::new("0abc");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_not_accept_special() -> Result<()> {
-        let result = PkgId::try_from("~abc");
+        let result = PkgId::new("~abc");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_not_accept_unicode() -> Result<()> {
-        let result = PkgId::try_from("abç");
+        let result = PkgId::new("abç");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_not_accept_empty() -> Result<()> {
-        let result = PkgId::try_from("");
+        let result = PkgId::new("");
         assert!(result.is_err(), "expected error, got {result:#?}");
         Ok(())
     }
 
     #[test]
     fn pkg_id_minimal_should_be_constructible_from_parts() -> Result<()> {
-        let name = PkgName::try_from("foobar")?;
-        let parts_input = PkgIdPartsRef::Minimal(name.as_ref());
+        let name = PkgName::new("foobar")?;
+        let parts_input = PkgIdPartsRef::Minimal(name);
         let id = PkgId::from_parts(parts_input);
         let parts_output = id.parts();
         assert_eq!(parts_input, parts_output);
