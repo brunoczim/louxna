@@ -5,12 +5,18 @@ pub use mlua::{StdLib, Value};
 
 use tokio::fs;
 
-use crate::{Error, error::ErrorInner};
+use crate::{
+    Error,
+    error::ErrorInner,
+    id::module::{ModId, ModIdPartsRef, ModPathRef},
+    module::Module,
+    package::PkgConfig,
+};
 
 #[derive(Debug)]
 pub struct Runtime {
     lua: Lua,
-    main_data: Vec<u8>,
+    main_module: Module,
 }
 
 impl Runtime {
@@ -26,17 +32,25 @@ impl Runtime {
         let lua = Lua::new_with(lua_stdlib, LuaOptions::new())
             .map_err(ErrorInner::InitLua)?;
 
+        let pkg_config = PkgConfig::load(&root_dir).await?;
         let main_path = root_dir.join("src/init.lua");
         let main_data = fs::read(&main_path).await.map_err(|source| {
             ErrorInner::ReadLuaMod { path: main_path.clone(), source }
         })?;
+        let main_mod_path = ModPathRef::ROOT;
+        let main_id = ModId::from_parts(ModIdPartsRef::External {
+            pkg_id: pkg_config.id().as_ref(),
+            mod_path: main_mod_path,
+        });
+        let main_module =
+            Module { id: main_id, path: main_path, content: main_data };
 
-        Ok(Self { lua, main_data })
+        Ok(Self { lua, main_module })
     }
 
     pub fn run(&self) -> Result<(), Error> {
         self.lua
-            .load(&self.main_data)
+            .load(&self.main_module)
             .exec()
             .map_err(|source| ErrorInner::EvalLuaMod { source })?;
         Ok(())

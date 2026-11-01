@@ -8,3 +8,7 @@ Introduce modules with custom `require()` function.
 
 - Modules are loaded recursively
 - The `require()` function is completely replaced
+
+## Status
+
+Pending

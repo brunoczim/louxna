@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt, mem, path::PathBuf};
+use std::{error::Error as StdError, ffi::OsString, fmt, mem, path::PathBuf};
 
 use thiserror::Error;
 use tokio::io;
@@ -68,6 +68,95 @@ pub enum ErrorInner {
         #[source]
         source: mlua::Error,
     },
+    #[error("invalid package name {:?}{}", input, path)]
+    InvalidPkgNameStr { input: String, path: ContextualPath },
+    #[error(
+        "invalid package name in OS string {:?}{}",
+        input.display().to_string(),
+        path
+    )]
+    InvalidPkgNameOsStr { input: OsString, path: ContextualPath },
+    #[error("invalid package identifier {:?}{}", input, path)]
+    InvalidPkgIdStr { input: String, path: ContextualPath },
+    #[error(
+        "invalid package identifier in OS string {:?}{}",
+        input.display().to_string(),
+        path
+    )]
+    InvalidPkgIdOsStr { input: OsString, path: ContextualPath },
+    #[error("invalid module segment {:?}{}", input, path)]
+    InvalidModSegmentStr { input: String, path: ContextualPath },
+    #[error(
+        "invalid module segment in OS string {:?}{}",
+        input.display().to_string(),
+        path
+    )]
+    InvalidModSegmentOsStr { input: OsString, path: ContextualPath },
+    #[error("invalid module path {:?}{}", input, path)]
+    InvalidModPathStr { input: String, path: ContextualPath },
+    #[error(
+        "invalid module path in OS string {:?}{}",
+        input.display().to_string(),
+        path
+    )]
+    InvalidModPathOsStr { input: OsString, path: ContextualPath },
+    #[error("invalid module identifier {:?}{}", input, path)]
+    InvalidModIdStr { input: String, path: ContextualPath },
+    #[error(
+        "invalid module identifier in OS string {:?}{}",
+        input.display().to_string(),
+        path
+    )]
+    InvalidModIdOsStr { input: OsString, path: ContextualPath },
+    #[error("failed to read package config from path {}", path.display())]
+    ReadPkgConfig {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("failed to parse package config read from path {}", path.display())]
+    ParsePkgConfig {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+    #[error("failed to write package config to path {}", path.display())]
+    WritePkgConfig {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error(
+        "failed to emit package config to be written to path {}",
+        path.display()
+    )]
+    EmitPkgConfig {
+        path: PathBuf,
+        #[source]
+        source: toml::ser::Error,
+    },
+}
+
+impl ErrorInner {
+    pub fn set_contextual_path(&mut self, new_path: impl Into<ContextualPath>) {
+        match self {
+            Self::InvalidPkgNameStr { path, .. }
+            | Self::InvalidPkgNameOsStr { path, .. }
+            | Self::InvalidModSegmentStr { path, .. }
+            | Self::InvalidModSegmentOsStr { path, .. }
+            | Self::InvalidModPathStr { path, .. }
+            | Self::InvalidModPathOsStr { path, .. } => *path = new_path.into(),
+            _ => (),
+        }
+    }
+
+    pub fn with_contextual_path(
+        mut self,
+        new_path: impl Into<ContextualPath>,
+    ) -> Self {
+        self.set_contextual_path(new_path);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -90,3 +179,24 @@ impl fmt::Display for ErrorMulti {
 }
 
 impl StdError for ErrorMulti {}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ContextualPath(pub Option<PathBuf>);
+
+impl fmt::Display for ContextualPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(path) = &self.0 {
+            write!(f, " (in path {})", path.display())?;
+        }
+        Ok(())
+    }
+}
+
+impl<P> From<P> for ContextualPath
+where
+    P: Into<PathBuf>,
+{
+    fn from(value: P) -> Self {
+        Self(Some(value.into()))
+    }
+}

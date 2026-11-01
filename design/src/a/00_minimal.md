@@ -9,3 +9,7 @@ Minimal working Louxna.
 - `run` command only
 - Custom `--root-dir`
 - Runs single file from `<root>/src/init.lua`
+
+## Status
+
+Done

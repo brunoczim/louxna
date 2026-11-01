@@ -24,3 +24,28 @@ Planned features:
         |- axis.lua
         |- vector.lua
 ```
+
+Example import:
+
+```lua
+-- External, just package name
+local tempo = require("moontoon/")
+
+-- External, package name and module
+local tempo = require("moontoon/music.tempo")
+
+-- External, with namespace
+local tempo = require("moontoon@brunoczim/music.tempo")
+
+-- External, with version
+local tempo = require("moontoon:0.1.0/music.tempo")
+
+-- External, with everything
+local tempo = require("moontoon:0.1.0@brunoczim/music.tempo")
+
+-- External, with everything but module
+local tempo = require("moontoon:0.1.0@brunoczim/")
+
+-- Internal
+local tempo = require("music.tempo")
+```

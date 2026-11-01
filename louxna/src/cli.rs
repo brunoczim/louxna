@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::runtime::Runtime;
+use crate::{id::package::PkgName, package::PkgConfig, runtime::Runtime};
 
 #[derive(Debug, Clone, Parser)]
 pub struct Cli {
@@ -21,12 +21,14 @@ impl Cli {
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
     Run(RunCommand),
+    Init(InitCommand),
 }
 
 impl Command {
     pub async fn run(self, root: PathBuf) -> anyhow::Result<()> {
         match self {
             Self::Run(cmd) => cmd.run(root).await,
+            Self::Init(cmd) => cmd.run(root).await,
         }
     }
 }
@@ -38,6 +40,20 @@ impl RunCommand {
     pub async fn run(self, root: PathBuf) -> anyhow::Result<()> {
         let runtime = Runtime::new(root).await?;
         runtime.run()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct InitCommand {
+    #[clap(short = 'n', long = "name")]
+    pub name: PkgName,
+}
+
+impl InitCommand {
+    pub async fn run(self, root: PathBuf) -> anyhow::Result<()> {
+        let pkg = PkgConfig { name: self.name };
+        pkg.save(root).await?;
         Ok(())
     }
 }

@@ -8,3 +8,7 @@ Introduce namespace to the config;
 
 - The configuration now requires a namespace
 - The package is identified by its namespace and name
+
+## Status
+
+Pending
