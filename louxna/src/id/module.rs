@@ -1,5 +1,21 @@
-use std::{borrow::Borrow, fmt, mem, str::FromStr};
+use std::{
+    borrow::Borrow,
+    fmt,
+    mem,
+    ops::{
+        Deref,
+        Index,
+        Range,
+        RangeFrom,
+        RangeFull,
+        RangeInclusive,
+        RangeTo,
+        RangeToInclusive,
+    },
+    str::FromStr,
+};
 
+use mlua::{FromLua, IntoLua, Lua, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, error::ErrorInner, id::package::PkgId};
@@ -113,6 +129,12 @@ impl AsRef<str> for ModSegment {
     }
 }
 
+impl AsRef<Self> for ModSegment {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 impl fmt::Display for ModSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.content())
@@ -166,6 +188,127 @@ impl<'de> Deserialize<'de> for Box<ModSegment> {
     }
 }
 
+pub trait ModPathIndex: fmt::Debug {
+    type Output: ?Sized;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output>;
+}
+
+impl ModPathIndex for usize {
+    type Output = ModSegment;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        path.segments().nth(*self)
+    }
+}
+
+impl ModPathIndex for Range<usize> {
+    type Output = ModPath;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        if self.start >= self.end {
+            return Some(ModPath::ROOT);
+        }
+
+        let mut iter = path
+            .content()
+            .bytes()
+            .enumerate()
+            .filter(|(_, byte)| *byte == b'.')
+            .map(|(i, _)| i);
+        let mut pos = 0;
+        let mut curr_segment = 0;
+        loop {
+            if curr_segment == self.start {
+                break;
+            }
+            curr_segment += 1;
+            let Some(i) = iter.next() else {
+                if self.start == curr_segment {
+                    return Some(ModPath::ROOT);
+                }
+                None?
+            };
+            pos = i;
+        }
+        let start = pos;
+        loop {
+            curr_segment += 1;
+            if curr_segment == self.end {
+                break;
+            }
+            let Some(i) = iter.next() else { None? };
+            pos = i;
+        }
+        let end = pos;
+
+        unsafe { Some(ModPath::new_unchecked(&path.content()[start .. end])) }
+    }
+}
+
+impl ModPathIndex for RangeTo<usize> {
+    type Output = ModPath;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        ModPathIndex::get(&(0 .. self.end), path)
+    }
+}
+
+impl ModPathIndex for RangeFrom<usize> {
+    type Output = ModPath;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        let mut iter = path
+            .content()
+            .bytes()
+            .enumerate()
+            .filter(|(_, byte)| *byte == b'.')
+            .map(|(i, _)| i);
+        let mut pos = 0;
+        let mut curr_segment = 0;
+        loop {
+            if curr_segment == self.start {
+                break;
+            }
+            curr_segment += 1;
+            let Some(i) = iter.next() else {
+                if self.start == curr_segment {
+                    return Some(ModPath::ROOT);
+                }
+                None?
+            };
+            pos = i;
+        }
+        let start = pos;
+
+        unsafe { Some(ModPath::new_unchecked(&path.content()[start ..])) }
+    }
+}
+
+impl ModPathIndex for RangeToInclusive<usize> {
+    type Output = ModPath;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        ModPathIndex::get(&(0 .. self.end.saturating_add(1)), path)
+    }
+}
+
+impl ModPathIndex for RangeInclusive<usize> {
+    type Output = ModPath;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        ModPathIndex::get(&(0 .. self.end().saturating_add(1)), path)
+    }
+}
+
+impl ModPathIndex for RangeFull {
+    type Output = ModPath;
+
+    fn get<'a>(&self, path: &'a ModPath) -> Option<&'a Self::Output> {
+        Some(path)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct ModPath {
@@ -203,7 +346,7 @@ impl ModPath {
         unsafe { mem::transmute(content) }
     }
 
-    pub fn from_parts(
+    pub fn from_segments(
         parts: impl IntoIterator<Item = impl AsRef<ModSegment>>,
     ) -> Box<Self> {
         let mut iter = parts.into_iter();
@@ -218,7 +361,7 @@ impl ModPath {
         unsafe { Self::new_boxed_unchecked(content.into_boxed_str()) }
     }
 
-    pub fn parts<'a>(
+    pub fn segments<'a>(
         &'a self,
     ) -> impl Iterator<Item = &'a ModSegment> + Send + Sync + 'a {
         self.content()
@@ -226,8 +369,25 @@ impl ModPath {
             .map(|segment| unsafe { ModSegment::new_unchecked(segment) })
     }
 
+    pub fn count_segments(&self) -> usize {
+        self.content().bytes().filter(|ch| *ch == b'.').count()
+    }
+
     pub fn content(&self) -> &str {
         &self.content
+    }
+
+    pub fn get<'a, I>(&'a self, index: I) -> Option<&'a I::Output>
+    where
+        I: ModPathIndex,
+    {
+        index.get(self)
+    }
+}
+
+impl Default for Box<ModPath> {
+    fn default() -> Self {
+        ModPath::ROOT.to_owned()
     }
 }
 
@@ -297,6 +457,12 @@ impl AsRef<str> for ModPath {
     }
 }
 
+impl AsRef<Self> for ModPath {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 impl fmt::Display for ModPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.content())
@@ -352,6 +518,146 @@ impl<'de> Deserialize<'de> for Box<ModPath> {
     }
 }
 
+impl<I> Index<I> for ModPath
+where
+    I: ModPathIndex,
+{
+    type Output = <I as ModPathIndex>::Output;
+
+    fn index(&self, index: I) -> &Self::Output {
+        index.get(self).unwrap_or_else(|| {
+            panic!(
+                "module path segment-indexing {:?} is out of bounds {}",
+                index,
+                self.count_segments()
+            )
+        })
+    }
+}
+
+pub trait ModPathPush: fmt::Debug + Sized {
+    fn push_to(self, path: &mut ModPathBuf);
+
+    fn join_to(self, path: &ModPathBuf) -> ModPathBuf {
+        let mut cloned = path.clone();
+        self.push_to(&mut cloned);
+        cloned
+    }
+}
+
+impl ModPathPush for &'_ ModSegment {
+    fn push_to(self, path: &mut ModPathBuf) {
+        if !path.is_empty() {
+            path.inner.push('.');
+        }
+        path.inner.push_str(self.content());
+    }
+}
+
+impl ModPathPush for &'_ ModPath {
+    fn push_to(self, path: &mut ModPathBuf) {
+        path.inner.push('.');
+        path.inner.push_str(self.content());
+    }
+}
+
+impl ModPathPush for &'_ ModPathBuf {
+    fn push_to(self, path: &mut ModPathBuf) {
+        path.push(&self[..]);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct ModPathBuf {
+    inner: String,
+}
+
+impl ModPathBuf {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self { inner: String::with_capacity(cap) }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn first(&self) -> Option<&ModSegment> {
+        unsafe {
+            let pos = self.inner.bytes().position(|ch| ch == b'.')?;
+            Some(ModSegment::new_unchecked(&self.inner[.. pos]))
+        }
+    }
+
+    pub fn last(&self) -> Option<&ModSegment> {
+        unsafe {
+            let pos = self.inner.bytes().rposition(|ch| ch == b'.')?;
+            Some(ModSegment::new_unchecked(&self.inner[pos + 1 ..]))
+        }
+    }
+
+    pub fn push<P>(&mut self, extra: P)
+    where
+        P: ModPathPush,
+    {
+        extra.push_to(self)
+    }
+
+    pub fn pop(&mut self) -> bool {
+        let Some(pos) = self.inner.bytes().position(|ch| ch == b'.') else {
+            return false;
+        };
+        self.inner.truncate(pos);
+        true
+    }
+
+    pub fn join<P>(&self, extra: P) -> Self
+    where
+        P: ModPathPush,
+    {
+        extra.join_to(self)
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+}
+
+impl Deref for ModPathBuf {
+    type Target = ModPath;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { ModPath::new_unchecked(&self.inner) }
+    }
+}
+
+impl From<Box<ModPath>> for ModPathBuf {
+    fn from(value: Box<ModPath>) -> Self {
+        unsafe {
+            let content: Box<str> = mem::transmute(value);
+            Self { inner: content.into() }
+        }
+    }
+}
+
+impl From<ModPathBuf> for Box<ModPath> {
+    fn from(value: ModPathBuf) -> Self {
+        unsafe {
+            let content: Box<str> = value.inner.into_boxed_str();
+            mem::transmute(content)
+        }
+    }
+}
+
+impl<'a> From<&'a ModPath> for ModPathBuf {
+    fn from(value: &'a ModPath) -> Self {
+        Self { inner: value.content().into() }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModIdPartsRef<'a> {
     External { pkg_id: &'a PkgId, mod_path: &'a ModPath },
@@ -384,7 +690,7 @@ impl ModId {
     pub const INTERNAL_ROOT: &'static Self = unsafe { Self::new_unchecked("") };
 
     pub fn new(content: &str) -> Result<&Self, Error> {
-        let result = match content.split_once('/') {
+        let result = match content.split_once("::") {
             Some((pkg_id, mod_path)) => PkgId::new(pkg_id)
                 .and_then(|_| ModPath::new(mod_path))
                 .map(|_| ()),
@@ -412,11 +718,15 @@ impl ModId {
         unsafe { mem::transmute(content) }
     }
 
+    pub fn from_internal(path: &ModPath) -> &Self {
+        unsafe { Self::new_unchecked(path.content()) }
+    }
+
     pub fn from_parts(parts: ModIdPartsRef<'_>) -> Box<Self> {
         match parts {
             ModIdPartsRef::External { pkg_id, mod_path } => {
                 let content =
-                    format!("{}/{}", pkg_id.content(), mod_path.content());
+                    format!("{}::{}", pkg_id.content(), mod_path.content());
                 unsafe { Self::new_boxed_unchecked(content.into_boxed_str()) }
             },
             ModIdPartsRef::Internal { mod_path } => unsafe {
@@ -426,7 +736,7 @@ impl ModId {
     }
 
     pub fn parts<'a>(&'a self) -> ModIdPartsRef<'a> {
-        match self.content().split_once('/') {
+        match self.content().split_once("::") {
             Some((pkg_id, mod_path)) => unsafe {
                 ModIdPartsRef::External {
                     pkg_id: PkgId::new_unchecked(pkg_id),
@@ -490,6 +800,12 @@ impl<'a> TryFrom<String> for Box<ModId> {
     }
 }
 
+impl From<ModIdPartsRef<'_>> for Box<ModId> {
+    fn from(parts: ModIdPartsRef<'_>) -> Self {
+        ModId::from_parts(parts)
+    }
+}
+
 impl ToOwned for ModId {
     type Owned = Box<Self>;
 
@@ -507,6 +823,12 @@ impl Borrow<str> for ModId {
 impl AsRef<str> for ModId {
     fn as_ref(&self) -> &str {
         self.content()
+    }
+}
+
+impl AsRef<Self> for ModId {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
@@ -563,6 +885,34 @@ impl<'de> Deserialize<'de> for Box<ModId> {
         }
 
         deserializer.deserialize_str(Visitor)
+    }
+}
+
+impl FromLua for Box<ModId> {
+    fn from_lua(value: Value, lua: &Lua) -> Result<Self, mlua::Error> {
+        let stringified = Box::<str>::from_lua(value, lua)?;
+        let this =
+            ModId::new_boxed(stringified).map_err(mlua::Error::external)?;
+        Ok(this)
+    }
+}
+
+impl IntoLua for Box<ModId> {
+    fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
+        (*self).into_lua(lua)
+    }
+}
+
+impl IntoLua for &'_ Box<ModId> {
+    fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
+        (**self).into_lua(lua)
+    }
+}
+
+impl IntoLua for &'_ ModId {
+    fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
+        lua.create_string(self.content())
+            .and_then(|string| string.into_lua(lua))
     }
 }
 
@@ -665,7 +1015,7 @@ mod test {
 
     #[test]
     fn mod_id_should_accept_external_root() -> Result<()> {
-        let id = ModId::new("foobar/")?;
+        let id = ModId::new("foobar::")?;
         let parts = id.parts();
         assert_eq!(
             parts,
@@ -678,8 +1028,22 @@ mod test {
     }
 
     #[test]
+    fn mod_id_should_accept_external_full() -> Result<()> {
+        let id = ModId::new("bcz/foobar::bazz")?;
+        let parts = id.parts();
+        assert_eq!(
+            parts,
+            ModIdPartsRef::External {
+                pkg_id: PkgId::new("bcz/foobar")?,
+                mod_path: ModPath::new("bazz")?,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
     fn mod_id_should_accept_external_non_root_path() -> Result<()> {
-        let id = ModId::new("foobar/music.tuning")?;
+        let id = ModId::new("foobar::music.tuning")?;
         let parts = id.parts();
         assert_eq!(
             parts,

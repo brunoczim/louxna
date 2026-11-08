@@ -11,4 +11,4 @@ Introduce modules with custom `require()` function.
 
 ## Status
 
-Pending
+Done

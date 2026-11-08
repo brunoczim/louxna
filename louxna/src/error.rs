@@ -3,6 +3,8 @@ use std::{error::Error as StdError, ffi::OsString, fmt, mem, path::PathBuf};
 use thiserror::Error;
 use tokio::io;
 
+use crate::id::module::{ModId, ModPath};
+
 #[derive(Debug, Error)]
 #[error(transparent)]
 pub struct Error {
@@ -68,38 +70,66 @@ pub enum ErrorInner {
         #[source]
         source: mlua::Error,
     },
+    #[error("failed to set Lua CLI arguments")]
+    SetLuaCliArgs {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to create Lua require() function")]
+    CreateLuaRequire {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to set Lua require() function")]
+    SetLuaRequire {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to call Lua require() function")]
+    CallLuaRequire {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to create Lua environment for module")]
+    FailedToCreateLuaEnv {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to set arguments of Lua environment for module")]
+    FailedToSetLuaEnvArguments {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to create metatable of Lua environment for module")]
+    FailedToCreateLuaEnvMeta {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to set metatable __index of Lua environment for module")]
+    FailedToSetLuaEnvMetaIndex {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to set metatable __newindex of Lua environment for module")]
+    FailedToSetLuaEnvMetaNewIndex {
+        #[source]
+        source: mlua::Error,
+    },
+    #[error("failed to set metatable of Lua environment for module")]
+    FailedToSetLuaEnvMeta {
+        #[source]
+        source: mlua::Error,
+    },
     #[error("invalid package name {:?}{}", input, path)]
     InvalidPkgNameStr { input: String, path: ContextualPath },
-    #[error(
-        "invalid package name in OS string {:?}{}",
-        input.display().to_string(),
-        path
-    )]
-    InvalidPkgNameOsStr { input: OsString, path: ContextualPath },
+    #[error("invalid package namespace {:?}{}", input, path)]
+    InvalidPkgNamespaceStr { input: String, path: ContextualPath },
     #[error("invalid package identifier {:?}{}", input, path)]
     InvalidPkgIdStr { input: String, path: ContextualPath },
-    #[error(
-        "invalid package identifier in OS string {:?}{}",
-        input.display().to_string(),
-        path
-    )]
-    InvalidPkgIdOsStr { input: OsString, path: ContextualPath },
     #[error("invalid module segment {:?}{}", input, path)]
     InvalidModSegmentStr { input: String, path: ContextualPath },
-    #[error(
-        "invalid module segment in OS string {:?}{}",
-        input.display().to_string(),
-        path
-    )]
-    InvalidModSegmentOsStr { input: OsString, path: ContextualPath },
     #[error("invalid module path {:?}{}", input, path)]
     InvalidModPathStr { input: String, path: ContextualPath },
-    #[error(
-        "invalid module path in OS string {:?}{}",
-        input.display().to_string(),
-        path
-    )]
-    InvalidModPathOsStr { input: OsString, path: ContextualPath },
     #[error("invalid module identifier {:?}{}", input, path)]
     InvalidModIdStr { input: String, path: ContextualPath },
     #[error(
@@ -108,6 +138,12 @@ pub enum ErrorInner {
         path
     )]
     InvalidModIdOsStr { input: OsString, path: ContextualPath },
+    #[error("invalid module OS path {:?}", path.display().to_string())]
+    InvalidModOsPath { path: PathBuf },
+    #[error("duplicate module path {} inside the package {}", mod_path, path)]
+    DuplicateModPath { mod_path: Box<ModPath>, path: ContextualPath },
+    #[error("unknown module identifier {}", mod_id)]
+    UnknownModule { mod_id: Box<ModId> },
     #[error("failed to read package config from path {}", path.display())]
     ReadPkgConfig {
         path: PathBuf,
@@ -141,11 +177,9 @@ impl ErrorInner {
     pub fn set_contextual_path(&mut self, new_path: impl Into<ContextualPath>) {
         match self {
             Self::InvalidPkgNameStr { path, .. }
-            | Self::InvalidPkgNameOsStr { path, .. }
             | Self::InvalidModSegmentStr { path, .. }
-            | Self::InvalidModSegmentOsStr { path, .. }
             | Self::InvalidModPathStr { path, .. }
-            | Self::InvalidModPathOsStr { path, .. } => *path = new_path.into(),
+            | Self::DuplicateModPath { path, .. } => *path = new_path.into(),
             _ => (),
         }
     }

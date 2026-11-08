@@ -11,4 +11,4 @@ Introduce namespace to the config;
 
 ## Status
 
-Pending
+Done
