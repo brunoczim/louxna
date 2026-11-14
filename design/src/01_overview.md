@@ -43,3 +43,23 @@ local tempo = require("brunoczim/moontoon::music.tempo")
 -- Internal
 local tempo = require("music.tempo")
 ```
+
+## Example Package Configuration
+
+```toml
+name = "moontoon"
+namespace = "brunoczim"
+version = "1.0.0"
+dependencies = [
+    {
+        namespace = "brunoczim",
+        name = "rand",
+        version = "0.1.0",
+    },
+    {
+        namespace = "foobar",
+        name = "someutil",
+        version = "0.9.3",
+    },
+]
+```

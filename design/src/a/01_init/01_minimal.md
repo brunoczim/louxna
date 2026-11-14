@@ -1,4 +1,4 @@
-# Iteration 0
+# Step 1
 
 ## Goal
 
